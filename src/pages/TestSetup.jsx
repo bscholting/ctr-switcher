@@ -7,6 +7,8 @@ export default function TestSetup() {
   const [titles, setTitles] = useState(["", ""]);
   const [testStarted, setTestStarted] = useState(false);
   const [testCompleted, setTestCompleted] = useState(false);
+  const [timeLeftStr, setTimeLeftStr] = useState("");
+  const [currentTitle, setCurrentTitle] = useState("");
   const accessToken = localStorage.getItem('access_token');
 
   useEffect(() => {
@@ -32,6 +34,8 @@ export default function TestSetup() {
       setTestStarted(true);
       setTestCompleted(savedTest.completed);
       setTitles(savedTest.titles);
+      setCurrentTitle(savedTest.completed ? savedTest.titles[1] : savedTest.titles[0]);
+
       if (!savedTest.completed) {
         const timeElapsed = Date.now() - savedTest.startedAt;
         const timeLeft = 4 * 60 * 60 * 1000 - timeElapsed;
@@ -44,6 +48,30 @@ export default function TestSetup() {
     }
   }, [videoId]);
 
+  useEffect(() => {
+    const savedTest = JSON.parse(localStorage.getItem(`test_${videoId}`));
+    if (!savedTest || savedTest.completed) return;
+
+    const interval = setInterval(() => {
+      const timeElapsed = Date.now() - savedTest.startedAt;
+      const timeRemaining = 4 * 60 * 60 * 1000 - timeElapsed;
+
+      if (timeRemaining <= 0) {
+        clearInterval(interval);
+        setTimeLeftStr("Switching...");
+        return;
+      }
+
+      const hours = Math.floor(timeRemaining / (1000 * 60 * 60));
+      const minutes = Math.floor((timeRemaining % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((timeRemaining % (1000 * 60)) / 1000);
+
+      setTimeLeftStr(`${hours}h ${minutes}m ${seconds}s`);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [videoId]);
+
   const handleChange = (index, value) => {
     setTitles((prev) => {
       const updated = [...prev];
@@ -52,8 +80,10 @@ export default function TestSetup() {
     });
   };
 
-  const updateVideoTitle = async (videoId, newTitle) => {
+  const updateVideoTitle = async (videoId, newTitle, snippet) => {
     try {
+      const safeCategoryId = Number(snippet.categoryId) || 22;
+
       const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet`, {
         method: 'PUT',
         headers: {
@@ -63,17 +93,14 @@ export default function TestSetup() {
         body: JSON.stringify({
           id: videoId,
           snippet: {
+            ...snippet,
             title: newTitle,
-            categoryId: video.snippet.categoryId,
-            description: video.snippet.description,
-            tags: video.snippet.tags || [],
-            defaultLanguage: video.snippet.defaultLanguage || 'en',
+            categoryId: safeCategoryId,
           },
         }),
       });
 
-      const data = await res.json();
-      return data;
+      return await res.json();
     } catch (error) {
       console.error('Error updating video title:', error);
       return { error };
@@ -81,13 +108,27 @@ export default function TestSetup() {
   };
 
   const switchToSecondTitle = async (titleB) => {
-    await updateVideoTitle(videoId, titleB);
-    setTestCompleted(true);
+    const saved = JSON.parse(localStorage.getItem(`test_${videoId}`));
+    if (!saved?.snippet) {
+      console.error("❌ No saved snippet found. Can't update title.");
+      alert("Test failed: no video data available to switch title.");
+      return;
+    }
 
-    const existing = JSON.parse(localStorage.getItem(`test_${videoId}`));
+    const result = await updateVideoTitle(videoId, titleB, saved.snippet);
+
+    if (result.error || result.error?.message) {
+      console.error("❌ Failed to update title B:", result.error);
+      alert("⚠️ Title switch failed. Please refresh the page to retry.");
+      return;
+    }
+
+    setCurrentTitle(titleB);
+    setTestCompleted(true);
+    setTimeLeftStr("Test complete.");
     localStorage.setItem(
       `test_${videoId}`,
-      JSON.stringify({ ...existing, completed: true })
+      JSON.stringify({ ...saved, completed: true })
     );
 
     alert("✅ Switched to second title. Test complete!");
@@ -99,8 +140,13 @@ export default function TestSetup() {
       return;
     }
 
-    const result = await updateVideoTitle(videoId, titles[0]);
-    if (result.error) {
+    if (!video || !video.snippet) {
+      alert('Video data not available yet.');
+      return;
+    }
+
+    const result = await updateVideoTitle(videoId, titles[0], video.snippet);
+    if (result.error || result.error?.message) {
       alert(`❌ Failed to update title: ${result.error.message}`);
       return;
     }
@@ -109,10 +155,12 @@ export default function TestSetup() {
       titles,
       startedAt: Date.now(),
       completed: false,
+      snippet: video.snippet,
     };
 
     localStorage.setItem(`test_${videoId}`, JSON.stringify(testData));
     setTestStarted(true);
+    setCurrentTitle(titles[0]);
 
     setTimeout(() => switchToSecondTitle(titles[1]), 4 * 60 * 60 * 1000);
 
@@ -158,18 +206,19 @@ export default function TestSetup() {
         </div>
       ))}
 
-      {testCompleted ? (
-        <p className="text-green-600 font-medium mt-6">
-          ✅ Test complete. Title B is now live.
-        </p>
-      ) : testStarted ? (
-        <p className="text-blue-600 font-medium mt-6">
-          ⏳ Test is running. Title B will switch in 4 hours.
-        </p>
-      ) : (
+      {testStarted && (
+        <div className="mt-6 p-4 border rounded bg-gray-50">
+          <p className="font-medium">🧪 Test Status:</p>
+          <p>Current Title: <strong>{currentTitle}</strong></p>
+          {!testCompleted && <p>Time Until Switch: <strong>{timeLeftStr}</strong></p>}
+          {testCompleted && <p className="text-green-600 font-semibold mt-2">✅ Title B is now live.</p>}
+        </div>
+      )}
+
+      {!testStarted && (
         <button
           onClick={startTest}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition"
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition mt-4"
         >
           Start Test
         </button>

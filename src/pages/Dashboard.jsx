@@ -1,95 +1,142 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-export default function Dashboard({ user }) {
+export default function Dashboard() {
   const [videos, setVideos] = useState([]);
   const accessToken = localStorage.getItem('access_token');
 
   useEffect(() => {
-    const loadVideos = async () => {
-      const channelId = await getChannelId(accessToken);
-      if (!channelId) return;
-
-      const vids = await getVideos(channelId, accessToken);
-      setVideos(vids);
+    const fetchVideos = async () => {
+      try {
+        const channelRes = await fetch(
+          'https://www.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true',
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
+        );
+        const channelData = await channelRes.json();
+        console.log("🔍 Channel API response:", channelData);
+  
+        if (!channelData.items || channelData.items.length === 0) {
+          console.error("❌ No channel data returned:", channelData);
+          throw new Error("No channel found.");
+        }
+  
+        const uploadsPlaylistId = channelData.items[0]?.contentDetails?.relatedPlaylists?.uploads;
+  
+        if (!uploadsPlaylistId) {
+          console.error("❌ No uploads playlist found in channel data:", channelData);
+          throw new Error("No uploads playlist found.");
+        }
+  
+        const playlistRes = await fetch(
+          `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=25`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
+        );
+        const playlistData = await playlistRes.json();
+        const videoItems = playlistData.items || [];
+  
+        const formatted = videoItems.map((item) => ({
+          id: item.snippet.resourceId.videoId,
+          snippet: item.snippet,
+        }));
+  
+        setVideos(formatted);
+      } catch (err) {
+        console.error("❌ Error loading videos:", err);
+        setVideos([]);
+      }
     };
-
-    loadVideos();
+  
+    fetchVideos();
   }, []);
+  
+
+  const getTestStatus = (videoId) => {
+    const test = JSON.parse(localStorage.getItem(`test_${videoId}`));
+    if (!test) return { status: 'Not Started' };
+
+    if (test.completed) {
+      return { status: '✅ Complete', currentTitle: test.titles[1] };
+    }
+
+    const timeElapsed = Date.now() - test.startedAt;
+    const timeLeft = 4 * 60 * 60 * 1000 - timeElapsed;
+
+    if (timeLeft <= 0) {
+      return { status: '⚠️ Should have switched', currentTitle: test.titles[0] };
+    }
+
+    const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+    const timeLeftStr = `${hours}h ${minutes}m ${seconds}s`;
+
+    return {
+      status: '⏳ Running',
+      timeLeft: timeLeftStr,
+      currentTitle: test.titles[0],
+    };
+  };
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
-    <div className="flex justify-end mb-4">
-      <button
-        onClick={() => {
-          localStorage.removeItem('ctr_user');
-          localStorage.removeItem('access_token');
-          window.location.href = '/';
-        }}
-        className="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded"
-      >
-        Logout
-      </button>
-    </div>
+      <h1 className="text-3xl font-bold mb-6">Your Videos</h1>
 
-    <h2 className="text-2xl font-semibold mb-6">
-      Welcome, {user.name.split(' ')[0]} 👋
-    </h2>
-
-      {videos.length > 0 ? (
-        <div className="grid gap-6">
-          {videos.map((video) => (
-            <Link
-            to={`/test/${video.id.videoId || video.id}`}
-            key={video.id.videoId || video.id}
-            className="flex items-center gap-4 border p-4 rounded-lg shadow-sm hover:bg-gray-50 transition"
-          >
-            <img
-              src={video.snippet.thumbnails.medium.url}
-              alt={video.snippet.title}
-              className="w-32 rounded-md"
-            />
-            <div className="flex-1">
-              <h3 className="font-semibold">{video.snippet.title}</h3>
-              <p className="text-sm text-gray-500">
-                Published: {new Date(video.snippet.publishedAt).toLocaleDateString()}
-              </p>
-            </div>
-          </Link>
-          ))}
-        </div>
+      {videos.length === 0 ? (
+        <p>Loading...</p>
       ) : (
-        <p className="text-gray-500">Loading videos...</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {videos.map((video) => {
+            const { status, timeLeft, currentTitle } = getTestStatus(video.id);
+
+            return (
+              <div key={video.id} className="border p-4 rounded shadow-sm">
+                <img
+                  src={video.snippet.thumbnails.medium.url}
+                  alt={video.snippet.title}
+                  className="h-auto rounded-md mb-3"
+                />
+                <h2 className="font-semibold text-lg">{video.snippet.title}</h2>
+                <p className="text-sm text-gray-500 mb-2">
+                  Published: {new Date(video.snippet.publishedAt).toLocaleDateString()}
+                </p>
+
+                <div className="text-sm mb-2">
+                  <strong>Status:</strong> {status}
+                  {status === '⏳ Running' && (
+                    <>
+                      <br />
+                      <strong>Current Title:</strong> {currentTitle}
+                      <br />
+                      <strong>Time Left:</strong> {timeLeft}
+                    </>
+                  )}
+                  {status === '✅ Complete' && (
+                    <>
+                      <br />
+                      <strong>Final Title:</strong> {currentTitle}
+                    </>
+                  )}
+                </div>
+
+                <Link
+                  to={`/test/${video.id}`}
+                  className="text-blue-600 text-sm hover:underline"
+                >
+                  Manage Test →
+                </Link>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
 }
-
-async function getChannelId(accessToken) {
-    const res = await fetch(
-      'https://www.googleapis.com/youtube/v3/channels?part=id&mine=true',
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
-  
-    const data = await res.json();
-    return data.items?.[0]?.id || null;
-  }
-  
-  async function getVideos(channelId, accessToken) {
-    const res = await fetch(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&maxResults=10&order=date`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
-  
-    const data = await res.json();
-    return data.items || [];
-  }
-  

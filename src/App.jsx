@@ -6,47 +6,24 @@ import TestSetup from './pages/TestSetup';
 
 function App() {
   const [user, setUser] = useState(() => {
-    const stored = localStorage.getItem('ctr_user');
-    return stored ? JSON.parse(stored) : null;
+    const saved = localStorage.getItem('ctr_user');
+    return saved ? JSON.parse(saved) : null;
   });
-  
 
   return (
-    <Routes>
-      <Route
-        path="/"
-        element={
-          user ? (
-            <Navigate to="/dashboard" replace />
-          ) : (
-            <LoginPage setUser={setUser} />
-          )
-        }
-      />
-      <Route
-        path="/dashboard"
-        element={
-          user ? (
-            <Dashboard user={user} />
-          ) : (
-            <Navigate to="/" replace />
-          )
-        }
-      />
-      {/* Optional: Catch-all route for unknown URLs */}
-      <Route
-        path="*"
-        element={<Navigate to={user ? '/dashboard' : '/'} replace />}
-      />
-
-<Route
-  path="/test/:videoId"
-  element={
-    user ? <TestSetup /> : <Navigate to="/" replace />
-  }
-/>
-
-    </Routes>
+    
+      <Routes>
+        {user ? (
+          <>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/test/:videoId" element={<TestSetup />} />
+            <Route path="*" element={<Navigate to="/dashboard" />} />
+          </>
+        ) : (
+          <Route path="*" element={<LoginPage setUser={setUser} />} />
+        )}
+      </Routes>
+    
   );
 }
 
